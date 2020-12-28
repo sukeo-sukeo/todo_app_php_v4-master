@@ -1,71 +1,29 @@
 <?php
 
-session_start();
+//相対パスより絶対パス推奨 ... __DIR__ . / をつける
+//読み込むファイルの拡張子は必要
+require_once(__DIR__ . '/../app/config.php');
 
-define('DSN', 'mysql:host=db;dbname=myapp;charset=utf8mb4');
-define('DB_USER', 'myappuser');
-define('DB_PASS', 'myapppass');
-// define('SITE_URL', 'http://localhost:8562');
-//phpの$_SERVER変数で取得できるので下記でもOK！
-define('SITE_URL', 'http://' . $_SERVER['HTTP_HOST']);
-
-try{
-  $pdo = new PDO(DSN, DB_USER, DB_PASS, [
-    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_OBJ,
-    PDO::ATTR_EMULATE_PREPARES => false
-  ]);
-} catch(PDOException $e) {
-  echo $e->getMessage();
-  exit;
-}
-
-//htmlタグをエスケープする関数
-function h($str) {
-  return htmlspecialchars($str, ENT_QUOTES, 'UTF-8');
-}
-
-//csrf対策...tokenがなかったら作成
-function createToken() {
-  if (!isset($_SESSION['token'])) {
-    $_SESSION['token'] = bin2hex(random_bytes(32));
-  }
-}
-
-//csrf対策...tokenをバリデーション
-function validateToken() {
-  if (
-    //なかったらあかん
-   empty($_SESSION['token']) ||
-    //一致しなかったらあかん
-   $_SESSION['token'] !== filter_input(INPUT_POST, 'token')
-   ) {
-     exit('Invaid post request');
-   } 
-}
-
-//Todoを追加
-function addTodo($pdo) {
-  $title = trim(filter_input(INPUT_POST, 'title'));
-  if ($title === '') {
-    return;
-  }
-
-  $stmt = $pdo->prepare('INSERT INTO todos (title) VALUES (:title)');
-  $stmt->bindValue('title', $title, PDO::PARAM_STR);
-  $stmt->execute();
-
-}
-
-//Todoを取得
-function getTodos($pdo) {
-  $stmt = $pdo->query('SELECT * FROM todos ORDER BY id DESC');
-  $todos = $stmt->fetchAll();
-  return $todos;
-}
+createToken();
+$pdo = getPdoInstance();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  addTodo($pdo);
+  validateToken();
+  $action = filter_input(INPUT_GET, 'action');
+  
+  switch($action) {
+    case 'add':
+      addTodo($pdo);
+      break;
+    case 'toggle':
+      toggleTodo($pdo);
+      break;
+    case 'delete':
+      deleteTodo($pdo);
+      break;
+    default:
+      exit;
+  }
 
   header('Location: ' . SITE_URL);
   exit;
@@ -83,23 +41,38 @@ $todos = getTodos($pdo);
   <title>My Todos</title>
 </head>
 <body>
-  <h1>Todos</h1>
+  <main>
+    <h1>Todos</h1>
 
-  <!-- データを送信するときは必ずcsrf対策を施す -->
-  <form action="" method="post">
-    <input type="text" name="title" placeholder="Type new todo.">
-    <!-- formタグ内にinput要素がひとつの場合エンターキーで送信できる -->
-  </form>
+    <!-- データを送信するときは必ずcsrf対策を施す -->
+    <form action="?action=add" method="post">
+      <input type="text" name="title" placeholder="Type new todo.">
+      <!-- formタグ内にinput要素がひとつの場合エンターキーで送信できる -->
+      <input type="hidden" name="token" value="<?= h($_SESSION['token']); ?>">
+    </form>
 
-  <ul>
-    <?php foreach($todos as $todo): ?>
-    <li>
-      <input type="checkbox" <?= $todo->is_done ? 'checked' : ''; ?>>
-      <span class="<?= $todo->is_done ? 'done' : ''; ?>"><?= h($todo->title); ?></span>
-    </li>
-    <?php endforeach; ?>
-  </ul>
+    <ul>
+      <?php foreach($todos as $todo): ?>
+      <li>
+        <form action="?action=toggle" method="post">
+          <input type="checkbox" <?= $todo->is_done ? 'checked' : ''; ?>>
+          <input type="hidden" name="id" value="<?= h($todo->id); ?>">
+          <input type="hidden" name="token" value="<?= h($_SESSION['token']); ?>">
+        </form>
 
+        <span class="<?= $todo->is_done ? 'done' : ''; ?>"><?= h($todo->title); ?></span>
 
+        <form action="?action=delete" method="post" class="delete-form">
+          <span class="delete">✗</span>
+          <input type="hidden" name="id" value="<?= h($todo->id); ?>">
+          <input type="hidden" name="token" value="<?= h($_SESSION['token']); ?>">
+        </form>
+        
+      </li>
+      <?php endforeach; ?>
+    </ul>
+  </main>
+
+  <script src="js/main.js"></script>
 </body>
 </html>
